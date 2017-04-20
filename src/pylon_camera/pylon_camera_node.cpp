@@ -65,7 +65,8 @@ PylonCameraNode::PylonCameraNode()
       pylon_camera_(nullptr),
       it_(new image_transport::ImageTransport(nh_)),
       img_raw_pub_(it_->advertiseCamera("image_raw", 1)),
-      img_rect_pub_(nullptr),
+      it_rect_(new image_transport::ImageTransport(nh_)),
+      img_rect_pub_(it_rect_->advertiseCamera("image_rect", 1)),
       grab_imgs_raw_as_(
               nh_,
               "grab_images_raw",
@@ -355,9 +356,6 @@ bool PylonCameraNode::startGrabbing()
 
 void PylonCameraNode::setupRectification()
 {
-    img_rect_pub_ =
-        new ros::Publisher(nh_.advertise<sensor_msgs::Image>("image_rect", 1));
-
     grab_imgs_rect_as_ =
         new GrabImagesAS(nh_,
                          "grab_images_rect",
@@ -396,23 +394,26 @@ void PylonCameraNode::spin()
         {
             return;
         }
+        
+        sensor_msgs::CameraInfoPtr cam_info (new sensor_msgs::CameraInfo(camera_info_manager_->getCameraInfo()));
 
-        if ( img_raw_pub_.getNumSubscribers() > 0 )
+
+        if ( img_raw_pub_.getNumSubscribers() + getNumSubscribersRect() > 0 )
         {
             // get actual cam_info-object in every frame, because it might have
             // changed due to a 'set_camera_info'-service call
-            sensor_msgs::CameraInfoPtr cam_info(
-                        new sensor_msgs::CameraInfo(
-                                        camera_info_manager_->getCameraInfo()));
             cam_info->header.stamp = img_raw_msg_.header.stamp;
 
+        }
+        if ( img_raw_pub_.getNumSubscribers() > 0 )
+        {
             // Publish via image_transport
             img_raw_pub_.publish(img_raw_msg_, *cam_info);
         }
 
         if ( getNumSubscribersRect() > 0 )
         {
-            img_rect_pub_->publish(*cv_bridge_img_rect_);
+            img_rect_pub_.publish(*(cv_bridge_img_rect_->toImageMsg()), *cam_info);
         }
     }
 }
@@ -818,12 +819,12 @@ const std::string& PylonCameraNode::cameraFrame() const
 
 uint32_t PylonCameraNode::getNumSubscribersRect() const
 {
-    return camera_info_manager_->isCalibrated() ? img_rect_pub_->getNumSubscribers() : 0;
+    return camera_info_manager_->isCalibrated() ? img_rect_pub_.getNumSubscribers() : 0;
 }
 
 uint32_t PylonCameraNode::getNumSubscribers() const
 {
-    return img_raw_pub_.getNumSubscribers() + img_rect_pub_->getNumSubscribers();
+    return img_raw_pub_.getNumSubscribers() + img_rect_pub_.getNumSubscribers();
 }
 
 void PylonCameraNode::setupInitialCameraInfo(sensor_msgs::CameraInfo& cam_info_msg)
@@ -1520,6 +1521,8 @@ PylonCameraNode::~PylonCameraNode()
     pylon_camera_ = NULL;
     delete it_;
     it_ = NULL;
+    delete it_rect_;
+    it_rect_ = NULL;
 }
 
 }  // namespace pylon_camera
